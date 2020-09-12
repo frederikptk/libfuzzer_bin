@@ -34,6 +34,8 @@ uint64_t file_text_base = 0;
 uint64_t loaded_elf_base = 0;
 uint64_t text_segment_base_file = -1;
 
+pid_t child_pid;
+
 int check_elf_magic(Elf64_Ehdr* hdr){
 	return ((hdr->e_ident[EI_MAG0] == ELFMAG0) && (hdr->e_ident[EI_MAG1] == ELFMAG1) &&
 			(hdr->e_ident[EI_MAG2] == ELFMAG2) && (hdr->e_ident[EI_MAG3] == ELFMAG3));
@@ -80,7 +82,7 @@ int dl_iterate_phdr_callback(struct dl_phdr_info* info, size_t size, void* data)
 	return 0;
 }
 
-void signal_handler(int signo, siginfo_t *si, void* arg) {
+void signal_handler_sigtrap(int signo, siginfo_t *si, void* arg) {
 	ucontext_t* context = (ucontext_t*)arg;
 	uint64_t rip;
 
@@ -106,6 +108,10 @@ void signal_handler(int signo, siginfo_t *si, void* arg) {
 			printf(" BB: 0x%lx\n", bb_addr[i]);
 		}
 	}
+}
+
+void signal_handler_sigint(int signo, siginfo_t *si, void* arg) {
+	kill(child_pid, SIGKILL);
 }
 
 void init_fuzzer() {
@@ -248,10 +254,16 @@ __attribute__((constructor)) void init_elf() {
 	}*/
 	
 	// register the signal handler
-	action.sa_sigaction = &signal_handler;
+	/*action.sa_sigaction = &signal_handler_sigtrap;
 	action.sa_flags = SA_SIGINFO;
 	if (sigaction(SIGTRAP, &action, NULL) == -1) {
         	printf("Can't register signal handler for: SIGTRAP\n");
+        }*/
+        
+        action.sa_sigaction = &signal_handler_sigint;
+	action.sa_flags = SA_SIGINFO;
+	if (sigaction(SIGINT, &action, NULL) == -1) {
+        	exit(EXIT_FAILURE);
         }
 	
 	fclose(fp);
