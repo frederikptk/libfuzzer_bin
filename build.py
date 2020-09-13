@@ -53,7 +53,7 @@ for i in range(0,len(bbs)):
 f_c = open("bb.h", "w")
 f_c.write("#pragma once\n")
 f_c.write("#define BINARY_PATH \"./" + sys.argv[1] + "\"\n");
-f_c.write("#define BB_COUNT " + str(len(bbs)) + "\nunsigned char bb_patched_byte[BB_COUNT];\nunsigned long bb_addr[BB_COUNT]={\n")
+f_c.write("#define BB_COUNT " + str(len(bbs)) + "\nunsigned long bb_addr[BB_COUNT]={\n")
 
 for bb in bbs:
 	f_c.write(bb + ",\n")
@@ -79,15 +79,15 @@ f_asm.write("__stop__sancov_pcs:\n");
 
 # 8-bit counters
 # M: mergable section. Set entsize (character size) to size of whole section since linker might remove duplicate entries.
-f_asm.write(".section __sancov_bools , \"awM\", @progbits, " + str(len(bbs)) + "\n");
-f_asm.write(".globl __start__sancov_bools\n");
-f_asm.write("__start__sancov_bools:\n");
+f_asm.write(".section __sancov_cntrs , \"awM\", @progbits, " + str(len(bbs)) + "\n");
+f_asm.write(".globl __start__sancov_cntrs\n");
+f_asm.write("__start__sancov_cntrs:\n");
 
 for i in range(0, len(bbs)):
 	f_asm.write(".byte 0\n")
 
-f_asm.write(".globl __stop__sancov_bools\n");
-f_asm.write("__stop__sancov_bools:\n");
+f_asm.write(".globl __stop__sancov_cntrs\n");
+f_asm.write("__stop__sancov_cntrs:\n");
 
 # Cleanup
 f_c.write("};\n")

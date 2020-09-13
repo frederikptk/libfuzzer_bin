@@ -11,8 +11,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include<signal.h>
+#include <signal.h>
 #include <sys/mman.h>
+
+#include <map>
 
 #include <bb.h>
 
@@ -20,12 +22,13 @@
 // hold the addresses of the functions (base + offset)
 extern unsigned long bb_addr[BB_COUNT];
 
-extern unsigned char bb_patched_byte[BB_COUNT];
+std::map<uint64_t, uint8_t> bb_map_patched_byte __attribute__((init_priority(101)));; // maps bb addresses to a patched byte
+std::map<uint64_t, unsigned int> bb_map_index __attribute__((init_priority(101)));; // maps a bb address to an index in bb_addr, will be used for the counters
 
 extern void* __start__sancov_pcs;
 extern void* __stop__sancov_pcs;
-extern void* __start__sancov_bools;
-extern void* __stop__sancov_bools;
+extern void* __start__sancov_cntrs;
+extern void* __stop__sancov_cntrs;
 
 void* elf_handle = NULL;
 uint64_t loaded_text_base = 0;
@@ -82,34 +85,6 @@ int dl_iterate_phdr_callback(struct dl_phdr_info* info, size_t size, void* data)
 	return 0;
 }
 
-void signal_handler_sigtrap(int signo, siginfo_t *si, void* arg) {
-	ucontext_t* context = (ucontext_t*)arg;
-	uint64_t rip;
-
-	if (signo == SIGTRAP) {	// sanity check
-		context->uc_mcontext.gregs[REG_RIP] -= 1;
-		rip = context->uc_mcontext.gregs[REG_RIP];
-		//printf("RIP: 0x%lx\n", rip);
-		
-		for (unsigned int i = 0; i < BB_COUNT; i++) {
-			if (bb_addr[i] == rip) {
-				// patch the old byte
-				*((uint8_t*)(bb_addr[i])) = bb_patched_byte[i];
-				
-				// fuzzer counter
-				((uint8_t*)&__start__sancov_bools)[i] = 1;
-				
-				return;
-			}
-		}
-		
-		// if we are here, we could not find a BB for the trap
-		for (unsigned int i = 0; i < BB_COUNT; i++) {
-			printf(" BB: 0x%lx\n", bb_addr[i]);
-		}
-	}
-}
-
 void signal_handler_sigint(int signo, siginfo_t *si, void* arg) {
 	kill(child_pid, SIGKILL);
 }
@@ -120,21 +95,20 @@ void init_fuzzer() {
 	for (unsigned int i = 0; i < BB_COUNT; i++) {
 		printf(" BB: 0x%lx\n", bb_addr[i]);
 		
-		((uint8_t*)&__start__sancov_bools)[i] = 0; // reset the bool array
+		((uint8_t*)&__start__sancov_cntrs)[i] = 0; // reset the bool array
 		
 		uint8_t* patched_byte = (uint8_t*)(bb_addr[i]);
-		bb_patched_byte[i] = *patched_byte; // just read in this byte one time during initialization
+		
+		bb_map_index.insert(std::make_pair((uint64_t)bb_addr[i], i));
+		bb_map_patched_byte.insert(std::make_pair((uint64_t)bb_addr[i], *patched_byte));
+
 		*patched_byte = 0xcc; // int3
 	}
 }
 
-void reset_fuzzer() {
-	//printf("[RESETTING FUZZER]\n");
-	
+void reset_fuzzer() {	
 	for (unsigned int i = 0; i < BB_COUNT; i++) {
-		//printf(" BB: 0x%lx\n", bb_addr[i]);
-		
-		//((uint8_t*)&__start__sancov_bools)[i] = 0; // reset the bool array
+		((uint8_t*)&__start__sancov_cntrs)[i] = 0; // reset the bool array
 			
 		uint8_t* patched_byte = (uint8_t*)(bb_addr[i]);
 		*patched_byte = 0xcc; // int3
@@ -179,7 +153,6 @@ __attribute__((constructor)) void init_elf() {
 	ehdr = (Elf64_Ehdr*) malloc(st.st_size);
 	fseek(fp, 0L, SEEK_SET);
 	fread(ehdr, sizeof(char), st.st_size, fp);
-	//printf("Copied ELF into memory. Size: 0x%lx\n", st.st_size);
 	
 	
 	if (!check_elf_magic(ehdr)){
@@ -246,19 +219,6 @@ __attribute__((constructor)) void init_elf() {
 	}
 	
 	init_fuzzer();
-	
-	/*if (mprotect((void*)loaded_text_segment_base, text_phdr->p_memsz, PROT_READ | PROT_EXEC) == -1) {
-		printf("mprotect failed: Could not make binary code R/E\n");
-		exit(EXIT_FAILURE);
-		return;
-	}*/
-	
-	// register the signal handler
-	/*action.sa_sigaction = &signal_handler_sigtrap;
-	action.sa_flags = SA_SIGINFO;
-	if (sigaction(SIGTRAP, &action, NULL) == -1) {
-        	printf("Can't register signal handler for: SIGTRAP\n");
-        }*/
         
         action.sa_sigaction = &signal_handler_sigint;
 	action.sa_flags = SA_SIGINFO;
@@ -276,7 +236,7 @@ extern "C" void __sanitizer_cov_8bit_counters_init(void*, void*); // __sanitizer
 extern "C" void __sanitizer_cov_pcs_init(void*, void*);
 
 __attribute__((constructor)) void sancov_init_bool_flags() {
-	__sanitizer_cov_8bit_counters_init(&__start__sancov_bools, &__stop__sancov_bools);
+	__sanitizer_cov_8bit_counters_init(&__start__sancov_cntrs, &__stop__sancov_cntrs);
 	__sanitizer_cov_pcs_init(&__start__sancov_pcs, &__stop__sancov_pcs);
 }
 

@@ -17,7 +17,7 @@ echo "Done"
 cd ..
 
 #-fsanitize=fuzzer
-$2 -g -O1 -I./ -c main.c -o build/main.o
+$2 -g -O1 -I./ -c main.cpp -o build/main.o
 $2 -c bb.S -o build/bb.o
 $2 -fsanitize=fuzzer build/main.o build/bb.o -o build/fuzz -ldl -v
 
